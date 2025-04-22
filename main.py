@@ -12,7 +12,13 @@ import csv
 from typing import Optional
 
 KEY_SIZE_BYTES = 16
+
+PYTHON = "python3"
+
+ESP_CMD = [PYTHON, "-m", "esptool"]
+
 files_to_create = ["device.pem.crt", "private.pem.key", "nvs.csv"]
+
 
 def execute_command(command_list, verbose=False):
     """
@@ -163,7 +169,7 @@ def generate_cert_bin(device_mac: str, version: str) -> int:
         put_hardware_version(csv_path, version)
         
         cmd = [
-            "python", "cert_gen.py",
+            PYTHON, "cert_gen.py",
             "generate",
             csv_path,
             os.path.join(mac_path, "certs.bin"),
@@ -192,7 +198,7 @@ def flash_nvs(device_mac: str, port) -> int:
             raise FileNotFoundError(f"Binary file '{bin_file}' not found.")
         
         cmd = [
-            "esptool",
+            *ESP_CMD,
             "--port", port,
             "--baud", "115200",
             "write_flash",
@@ -283,7 +289,7 @@ def create_folder_and_files(device_mac: str, file_names: list[str],target_file_f
 
 def get_mac_address(port) -> str:
     cmd = [
-        "esptool",
+        *ESP_CMD,
         "--port", port,
         "read_mac",
     ]
