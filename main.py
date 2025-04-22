@@ -9,7 +9,7 @@ import shlex # Used for safer display of commands
 import os
 import secrets
 import csv
-from typing import Optional
+from typing import Optional, List
 
 KEY_SIZE_BYTES = 16
 
@@ -214,7 +214,7 @@ def flash_nvs(device_mac: str, port) -> int:
         print(f"Error: {e}")
         return 1
     
-def create_folder_and_files(device_mac: str, file_names: list[str],target_file_for_content: Optional[str] = None) -> bool:
+def create_folder_and_files(device_mac: str, file_names: List[str],target_file_for_content: Optional[str] = None) -> bool:
     # --- 1. Create the folder ---
     mac = "".join(device_mac.strip().split(':'))
     folder_path = os.path.join("certs", mac)
