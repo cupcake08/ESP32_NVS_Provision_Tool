@@ -17,8 +17,8 @@ PYTHON = "python3"
 
 ESP_CMD = [PYTHON, "-m", "esptool"]
 
-files_to_create = ["device.pem.crt", "private.pem.key", "nvs.csv"]
-
+files_to_create = ["certificate.pem.crt", "private.pem.key", "nvs.csv"]
+# files_to_create = ["nvs.csv"]
 
 def execute_command(command_list, verbose=False):
     """
@@ -81,7 +81,7 @@ def execute_command(command_list, verbose=False):
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
         return 1 # Indicate general error
     
-def generate_aes_key(key_length_bytes: int) -> bytes:
+def generate_aes_key(key_length_bytes: int, unit: str, device_mac: str) -> bytes:
     """
     Generates a cryptographically secure random key of the specified length.
 
@@ -92,7 +92,8 @@ def generate_aes_key(key_length_bytes: int) -> bytes:
         A bytes object containing the random key.
     """
     # secrets.token_bytes uses os.urandom() or equivalent secure source
-    return secrets.token_bytes(key_length_bytes)
+    # return secrets.token_bytes(key_length_bytes)
+    return (unit + '_' + device_mac.upper()) * 2
 
 def put_hardware_version(filepath: str, version: str):
     try:
@@ -122,7 +123,7 @@ def put_hardware_version(filepath: str, version: str):
         # Catch any other unexpected errors during the process
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
 
-def put_aes_key(filepath: str):
+def put_aes_key(filepath: str, unit: str, mac: str):
     try:
         with open(filepath, mode='r+', newline='', encoding='utf-8') as csvfile:
 
@@ -134,7 +135,7 @@ def put_aes_key(filepath: str):
                     return
                 
             # put the aes key into nvs file
-            aes_key = generate_aes_key(KEY_SIZE_BYTES).hex()
+            aes_key = generate_aes_key(KEY_SIZE_BYTES,unit=unit, device_mac=mac)
             print(f"AES Key: {aes_key}")
 
             row_to_append = ["aes_key", "data", "string", aes_key]
@@ -154,10 +155,10 @@ def put_aes_key(filepath: str):
         # Catch any other unexpected errors during the process
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
     
-def generate_cert_bin(device_mac: str, version: str) -> int:
+def generate_cert_bin(device_mac: str, version: str, unit: str) -> int:
     try:
         mac = "".join(device_mac.strip().split(':'))
-        mac_path = os.path.join("certs", mac)
+        mac_path = os.path.join("certs", unit + '_' + mac.upper())
         csv_path = os.path.join(mac_path ,"nvs.csv")
 
         print("csv: " + csv_path)
@@ -165,7 +166,7 @@ def generate_cert_bin(device_mac: str, version: str) -> int:
         if not os.path.exists(csv_path):
             raise FileNotFoundError("csv file not found")
 
-        put_aes_key(csv_path)
+        put_aes_key(csv_path, unit=unit, mac=mac)
         put_hardware_version(csv_path, version)
         
         cmd = [
@@ -189,10 +190,10 @@ def generate_cert_bin(device_mac: str, version: str) -> int:
         print("- (manual)      python main.py --mac <mac> -g")
         return 1
     
-def flash_nvs(device_mac: str, port) -> int:
+def flash_nvs(device_mac: str, unit: str, port) -> int:
     try:
         mac = "".join(device_mac.strip().split(':'))
-        bin_file = os.path.join("certs", mac,"certs.bin")
+        bin_file = os.path.join("certs",  unit + '_' + mac.upper(),"certs.bin")
 
         if not os.path.exists(bin_file):
             raise FileNotFoundError(f"Binary file '{bin_file}' not found.")
@@ -214,10 +215,11 @@ def flash_nvs(device_mac: str, port) -> int:
         print(f"Error: {e}")
         return 1
     
-def create_folder_and_files(device_mac: str, file_names: List[str],target_file_for_content: Optional[str] = None) -> bool:
+def create_folder_and_files(device_mac: str, file_names: List[str], unit: str,target_file_for_content: Optional[str] = None) -> bool:
     # --- 1. Create the folder ---
     mac = "".join(device_mac.strip().split(':'))
-    folder_path = os.path.join("certs", mac)
+    folder_path = os.path.join("certs", unit + '_' + mac.upper())
+    print("folder:", folder_path)
     try:
         # os.makedirs creates the directory and any necessary parent directories.
         # exist_ok=True prevents an error if the directory already exists.
@@ -238,6 +240,9 @@ def create_folder_and_files(device_mac: str, file_names: List[str],target_file_f
         # Construct the full path for the file using os.path.join
         # This ensures cross-platform compatibility (handles '/' vs '\')
         file_path = os.path.join(folder_path, filename)
+
+        if os.path.exists(file_path):
+            continue
 
         try:
             # Create an empty file by opening it in write mode ('w')
@@ -270,7 +275,7 @@ def create_folder_and_files(device_mac: str, file_names: List[str],target_file_f
         with open(file_path, mode='w', newline='', encoding='utf-8') as csvfile:
 
             priv_key_path = os.path.join(folder_path, "private.pem.key")
-            cert_path = os.path.join(folder_path, "device.pem.crt")
+            cert_path = os.path.join(folder_path, "certificate.pem.crt")
 
             rows_to_append = [
                 ["key","type","encoding","value"],
@@ -350,13 +355,21 @@ def main():
         help="Specify the target hardware version." # Help text shown with -h
     )
 
+    #Define the --hv argument
+    parser.add_argument(
+        "--unit",
+        type=str,                             # Expect a string value
+        help="Specify the unit number" # Help text shown with -h
+    )
+
     # Parse the arguments provided from the command line
     args = parser.parse_args()
 
     # Print the parsed arguments
     print("--- Arguments ---")
-    print(f"Port:    {args.port if args.port is not None else 'Not specified'}")
-    print(f"MAC:     {args.mac if args.mac is not None else 'Not specified'}")
+    print(f"Port:     {args.port if args.port is not None else 'Not specified'}")
+    print(f"MAC:      {args.mac if args.mac is not None else 'Not specified'}")
+    print(f"Unit:     {args.unit if args.unit is not None else 'Not specified'}")
     print(f"Generate: {args.generate}")
     print("------------------------")
 
@@ -368,13 +381,14 @@ def main():
         if(code == 0):
             flash_nvs(device_mac=args.mac, port=args.port)
     
-    elif args.port and args.hv:
+    elif args.port and args.hv and args.unit:
         mac = get_mac_address(args.port)
         if mac:
             print("MAC:", mac)
-            code = generate_cert_bin(device_mac=mac,version=args.hv)
+            create_folder_and_files(device_mac=mac,file_names=files_to_create,target_file_for_content=files_to_create[-1],unit=args.unit)
+            code = generate_cert_bin(device_mac=mac,version=args.hv,unit=args.unit)
             if(code == 0):
-                flash_nvs(device_mac=mac,port=args.port)
+                flash_nvs(device_mac=mac,port=args.port,unit=args.unit)
         else:
             print("Device Not Connected!")
     
